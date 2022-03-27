@@ -1,5 +1,3 @@
-using Assets.Scripts.Core;
-using Assets.Scripts.Weapon;
 using System;
 using UnityEngine;
 
@@ -9,8 +7,9 @@ namespace Assets.Scripts
     {
         [SerializeField] private RectTransform _target;
         [SerializeField] private RectTransform _shipBody;
+        [SerializeField] private ShipBoundsChecker _boundsChecker;
+
         private RectTransform _shipTransform;
-        private PlayField _playField;
 
         private float _maxMoveSpeed;
         private float _acceleration;
@@ -30,6 +29,8 @@ namespace Assets.Scripts
         private float _currentRotationSpeed;
         private Vector3 _targetStartPosition;
         public RectTransform ShipTransform => _shipTransform;
+        public ShipBoundsChecker ShipBoundsChecker => _boundsChecker;
+        public RectTransform ShipBody => _shipBody;
 
         private bool _isAccelerate;
         private bool _isInited;
@@ -37,11 +38,9 @@ namespace Assets.Scripts
         public Action<float> OnRotationChanged;
         public Action<float> OnSpeedChanged;
         public Action<float, float> OnPositionChanged;
-        public Action OnDamaged;
+
         public void Init(float maxMoveSpeed, float acceleration, float rotaionSpeed, float stopSpeed)
         {
-            _playField = Game.PlayField;
-
             _maxMoveSpeed = maxMoveSpeed;
             _acceleration = acceleration;
             _rotatinSpeed = rotaionSpeed;
@@ -79,14 +78,13 @@ namespace Assets.Scripts
             _target.SetParent(ShipTransform);
             _isAccelerate = false;
         }
-        public void Move()
+        private void Move()
         {
             var targetPosition = _target.position;
 
-            var tr = (RectTransform)transform;
-            tr.position += (targetPosition - tr.position) * CurrentSpeed * Time.deltaTime;
+            ShipTransform.position += (targetPosition - ShipTransform.position) * CurrentSpeed * Time.deltaTime;
 
-            OnPositionChanged?.Invoke(tr.anchoredPosition.y, tr.anchoredPosition.x);
+            OnPositionChanged?.Invoke(ShipTransform.anchoredPosition.y, ShipTransform.anchoredPosition.x);
         }
 
         private void Accelerate()
@@ -128,33 +126,6 @@ namespace Assets.Scripts
             OnRotationChanged?.Invoke(_shipBody.rotation.eulerAngles.z);
         }
 
-        public void OnPortalEnter()
-        {
-            var position = _shipTransform.anchoredPosition;
-
-            Vector3 newPosition = position;
-
-            if (position.x <= _playField.MinX)
-                newPosition.x = _playField.MaxX;
-            else if ((position.x >= _playField.MaxX))
-                newPosition.x = _playField.MinX;
-
-
-            if (position.y <= _playField.MinY)
-                newPosition.y = _playField.MaxY;
-
-            else if (position.y >= _playField.MaxY)
-                newPosition.y = _playField.MinY;
-
-
-            _shipTransform.anchoredPosition = newPosition;
-            OnPositionChanged?.Invoke(newPosition.y, newPosition.x);
-        }
-
-        public void Shoot(Bullet bullet)
-        {
-            Instantiate(bullet, _shipTransform.position, _shipBody.rotation, _playField.Rect);
-        }
         public void StopRotation()
         {
             _currentRotationSpeed = 0;
@@ -169,8 +140,8 @@ namespace Assets.Scripts
             CurrentSpeed = 0;
             StopRotation();
 
-            _shipTransform.anchoredPosition = Vector2.zero;
-            _shipTransform.rotation = Quaternion.identity;
+            ShipTransform.anchoredPosition = Vector2.zero;
+            ShipTransform.rotation = Quaternion.identity;
 
             _shipBody.rotation = Quaternion.identity;
 
@@ -178,7 +149,6 @@ namespace Assets.Scripts
             _target.localPosition = _targetStartPosition;
 
             _isInited = true;
-
         }
 
         public void OnGameOver()

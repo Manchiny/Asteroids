@@ -1,19 +1,16 @@
 using Assets.Scripts.Core;
+using System;
 using UnityEngine;
 
 namespace Assets.Scripts
 {
     public class ShipBoundsChecker : MonoBehaviour, IPlayFieldBoundsCheckable
     {
-        private Spaceship _ship;
+        public Action OnBoundCrossed;
 
-        private void Awake()
-        {
-            _ship = FindObjectOfType<Spaceship>();
-        }
         public void OnBoundCross()
         {
-            _ship.OnPortalEnter();
+            OnBoundCrossed?.Invoke();
         }
     }
 }

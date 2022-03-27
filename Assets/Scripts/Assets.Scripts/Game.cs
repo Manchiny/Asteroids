@@ -1,28 +1,21 @@
-using Assets.Scripts.Core;
 using Assets.Scripts.Enemies;
-using Assets.Scripts.UI;
 using Assets.Scripts.Weapon;
-using System.Collections;
+using System;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace Assets.Scripts
 {
-    public class Game : MonoBehaviour
+    public class Game
     {
-        [SerializeField] private PlayField _playField;
-        [SerializeField] private EnemySpawner _enemySpawner;
-        [SerializeField] private HUDView _hudView;        
-        [SerializeField] private List<Bullet> _bullets;
-
-        private WeaponManager _weaponManager;
-        public static Game Instance { get; private set; }
-        public static PlayField PlayField => Instance._playField;
         private Spaceship _spaceship;
-        public static Spaceship Spaceship => Instance._spaceship;
-        public static EnemySpawner EnemySpawner => Instance._enemySpawner;
-
         private SpaceshipPresenter _spaceshipPresenter;
+        private WeaponManager _weaponManager;
+        private EnemyManager _enemyManager;
+
+        public  Spaceship Spaceship => _spaceship;
+        public WeaponManager WeaponManager => _weaponManager;
+        public SpaceshipPresenter SpaceshipPresenter => _spaceshipPresenter;
+        public EnemyManager EnemyManager => _enemyManager;
 
         private int _scores;
         public int Scores
@@ -31,71 +24,48 @@ namespace Assets.Scripts
             private set
             {
                 _scores = value;
-                _hudView.SetScoresCount(Scores);
+                OnScoresChanged?.Invoke(_scores);
             }
         }
-        private void Awake()
+
+        public Action<int> OnScoresChanged;
+
+        public Game(Spaceship spaceship, List<Bullet> bullets, EnemyPrefabs enemyPrefabs)
         {
-            if (Instance == null)
-            {
-                Instance = this;
+            _spaceship = spaceship;
 
-                _spaceship = FindObjectOfType<Spaceship>();
-
-                return;
-            }
-            Destroy(this);
-        }
-        private void Start()
-        {
-            _weaponManager = new WeaponManager(_bullets);
-            _spaceshipPresenter = new SpaceshipPresenter(Spaceship, _hudView, _weaponManager);
-
-            _spaceship.OnPositionChanged += _hudView.SetCoordsText;
-            _spaceship.OnRotationChanged += _hudView.SetRotationText;
-            _spaceship.OnSpeedChanged += _hudView.SetSpeedText;
-
-            _weaponManager.OnLaserCooldawnUpdated += _hudView.SetLaserCooldawnText;
-            _weaponManager.OnLaserBulletsChanged += _hudView.SetLaserCountText;
-
-            StartGame();
-        }
-
-        private void StartGame()
-        {
-            Scores = 0;
-            _spaceshipPresenter.StartGame();
-            StartCoroutine(LaserCooldawnTimer());
+            _weaponManager = new WeaponManager(bullets);
+            _spaceshipPresenter = new SpaceshipPresenter(Spaceship, _weaponManager);
+            _enemyManager = new EnemyManager(enemyPrefabs);
         }
         public void OnEnemyKilled(Enemy enemy)
         {
             Scores += enemy.RewardScore;
         }
-        public void OnShipDied()
+        public void StartGame()
         {
-            StopAllCoroutines();
-
-            _hudView.OnGameOver(Scores, RestartGame);
-            _spaceshipPresenter.OnGameOver();
-            _enemySpawner.OnGameOver();
+            Scores = 0;
+            _spaceshipPresenter.StartGame();
         }
-        private void RestartGame()
+        public void RestartGame()
         {
             Scores = 0;
             _spaceshipPresenter.Restart();
-            _enemySpawner.Restart();
-
-            StartCoroutine(LaserCooldawnTimer());
+            _enemyManager.Restart();
         }
-        private IEnumerator LaserCooldawnTimer()
+
+        public void GameOver()
         {
-            yield return new WaitForSeconds(1f);
-            _weaponManager.DecreaseCooldawnTimer();
-            StartCoroutine(LaserCooldawnTimer());
+            _weaponManager.OnGameOver();
+            _spaceshipPresenter.OnGameOver();
+            _enemyManager.OnGameOver();
+        }
+
+        public void OnExit()
+        {
+            _weaponManager.OnExit();
+            _enemyManager.OnExit();
+            _spaceshipPresenter.OnExit();
         }
     }
 }
-
-
-
-

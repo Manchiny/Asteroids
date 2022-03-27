@@ -1,8 +1,7 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
-
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assets.Scripts.Weapon
 {
@@ -17,13 +16,17 @@ namespace Assets.Scripts.Weapon
         private int _currentBulletId;
         private Bullet _currentBullet;
 
+
+        CancellationTokenSource cancelTimerTokenSource;
+        CancellationToken cancelTimerToken;
+
         private int _cooldawnTimer;
         public int CooldawnTimer { 
             get => _cooldawnTimer; 
             private set 
             { 
                 _cooldawnTimer = value;
-                OnLaserCooldawnUpdated?.Invoke(_cooldawnTimer);
+                OnLaserCooldawnUpdated?.Invoke(value);
             } 
         }
 
@@ -52,20 +55,17 @@ namespace Assets.Scripts.Weapon
 
             CooldawnTimer = LASER_COOLDAWN_SECONDS;
             LaserBullets = MAX_LASER_BULLETS;
+
+            cancelTimerTokenSource = new CancellationTokenSource();
+            cancelTimerToken = cancelTimerTokenSource.Token;
+            RunPeriodicallyAsync(DecreaseCooldawnTimer, new TimeSpan(0, 0, 1), cancelTimerToken);
         }
 
-        public void DecreaseCooldawnTimer()
+        public Task DecreaseCooldawnTimer()
         {
-            CooldawnTimer -= 1;
+            CooldawnTimer --;
             UpdateTimer();
-        }
-        private IEnumerator LaserCooldawnTimer()
-        {
-            OnLaserCooldawnUpdated?.Invoke(CooldawnTimer);
-
-            yield return new WaitForSeconds(1);
-            CooldawnTimer -= 1;
-            UpdateTimer();
+            return Task.CompletedTask;
         }
 
         private void UpdateTimer()
@@ -115,9 +115,32 @@ namespace Assets.Scripts.Weapon
             LaserBullets = MAX_LASER_BULLETS;
         }
 
+        public async void RunPeriodicallyAsync(Func<Task> func, TimeSpan interval, CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(interval, cancellationToken);
+                    await func();
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+        public void OnExit()
+        {
+            if(cancelTimerTokenSource != null && cancelTimerTokenSource.IsCancellationRequested == false)
+            {
+                cancelTimerTokenSource?.Cancel();
+                cancelTimerTokenSource?.Dispose();
+            }
+        }
         public void OnGameOver()
         {
-
+            OnExit();
         }
 
         public void Restart()

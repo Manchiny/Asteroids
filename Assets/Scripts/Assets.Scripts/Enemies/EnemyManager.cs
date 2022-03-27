@@ -1,22 +1,20 @@
-using Assets.Scripts.Core;
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
+using Assets.Scripts.Core;
+using Assets.Scripts.Weapon;
 
 namespace Assets.Scripts.Enemies
 {
-    public class EnemySpawner : MonoBehaviour
+    public class EnemyManager
     {
         private const float SPAWN_TIME = 1.5f;
         private const int ASTEROID_PARTS_COUNT = 3;
         private const int POOL_COUNT = 20;
 
-
-        [SerializeField] private List<Enemy> _enemyPrefabs;
-        [SerializeField] private Asteroid _asteroidPrefab;
-        [SerializeField] private UFO _ufoPrefab;
-        [SerializeField] private MiniAsteroid _miniAsteroidPrefab;
+        private EnemyPrefabs _enemyPrefabs;
 
         private Vector3 _bottomLeftSpawnRotation = new(0, 0, -45f);
         private Vector3 _upperRightSpawnRotation = new(0, 0, 135f);
@@ -29,13 +27,21 @@ namespace Assets.Scripts.Enemies
 
         private Dictionary<Type, Queue<Enemy>> _enemiesPool;
         private List<Enemy> _enemiesOnPlayField;
-        private void Start()
+
+        public Action<Enemy> OnEnemyDied;
+        public Action OnSpaceshipDamaged;
+
+        CancellationTokenSource cancelTimerTokenSource;
+        CancellationToken cancelTimerToken;
+
+        public EnemyManager(EnemyPrefabs enemyPrefabs)
         {
+            _enemyPrefabs = enemyPrefabs;
             Init();
         }
         private void Init()
         {
-            _playField = Game.PlayField;
+            _playField = GamePresenter.PlayField;
             _enemiesOnPlayField = new List<Enemy>();
 
             _asteroids = new Queue<Enemy>();
@@ -44,15 +50,15 @@ namespace Assets.Scripts.Enemies
 
             _enemiesPool = new Dictionary<Type, Queue<Enemy>>();
 
-            _enemiesPool.Add(_asteroidPrefab.GetType(), _asteroids);
-            _enemiesPool.Add(_ufoPrefab.GetType(), _ufos);
-            _enemiesPool.Add(_miniAsteroidPrefab.GetType(), _miniAsteroids);
+            _enemiesPool.Add(_enemyPrefabs.AsteroidPrefab.GetType(), _asteroids);
+            _enemiesPool.Add(_enemyPrefabs.UFOPrefab.GetType(), _ufos);
+            _enemiesPool.Add(_enemyPrefabs.MiniAsteroidPrefab.GetType(), _miniAsteroids);
 
-            foreach (var prefab in _enemyPrefabs)
+            foreach (var prefab in _enemyPrefabs.EnemiesPrefabs)
             {
                 for (int i = 0; i < POOL_COUNT; i++)
                 {
-                    var newEnemy = Instantiate(prefab, _playField.Rect).GetComponent<Enemy>();
+                    var newEnemy = UnityEngine.Object.Instantiate(prefab, _playField.Rect).GetComponent<Enemy>();
                     _enemiesPool[newEnemy.GetType()].Enqueue(newEnemy);
                     newEnemy.gameObject.SetActive(false);
                 }
@@ -61,14 +67,15 @@ namespace Assets.Scripts.Enemies
             Restart();
         }
 
-        private void OnEnemyKilled(Enemy enemy)
+        private void OnEnemyKilled(Enemy enemy, Bullet bullet)
         {
+            bullet.OnDamage();
             PutInPool(enemy);
             if (enemy is Asteroid)
             {
                 SpawnMiniAstroids((RectTransform)enemy.transform);
             }
-            Game.Instance.OnEnemyKilled(enemy);
+            OnEnemyDied?.Invoke(enemy);
         }
         private void OnEnemyBoundCross(Enemy enemy)
         {
@@ -88,10 +95,10 @@ namespace Assets.Scripts.Enemies
         {
             Enemy createdEnemy = _enemiesPool[enemy.GetType()].Count > 0
                 ? _enemiesPool[enemy.GetType()].Dequeue()
-                : Instantiate(enemy, _playField.Rect);
+                : UnityEngine.Object.Instantiate(enemy, _playField.Rect);
 
             createdEnemy.transform.rotation = Quaternion.identity;
-            createdEnemy.Init(position, rotation);
+            createdEnemy.Init(position, rotation, this);
 
             _enemiesOnPlayField.Add(createdEnemy);
 
@@ -141,18 +148,6 @@ namespace Assets.Scripts.Enemies
             return (position: position, rotation: rotation);
         }
 
-        private IEnumerator SpawnTimer()
-        {
-            yield return new WaitForSeconds(SPAWN_TIME);
-
-            int random = UnityEngine.Random.Range(0, 10);
-            Enemy enemy = random < 7 ? _asteroidPrefab : _ufoPrefab;
-
-            var spawnPoint = GetRandomSpawnPoint();
-            Spawn(enemy, spawnPoint.position, spawnPoint.rotation);
-            StartCoroutine(SpawnTimer());
-        }
-
         public void SpawnMiniAstroids(RectTransform parentAsteroid)
         {
             for (int i = 0; i < ASTEROID_PARTS_COUNT; i++)
@@ -171,12 +166,13 @@ namespace Assets.Scripts.Enemies
             float randomAngel = UnityEngine.Random.Range(rotation.z - 30, rotation.z + 30);
             rotation.z = randomAngel;
 
-            Spawn(_miniAsteroidPrefab, randomPosition, rotation);
+            Spawn(_enemyPrefabs.MiniAsteroidPrefab, randomPosition, rotation);
         }
 
         public void OnGameOver()
         {
-            StopAllCoroutines();
+            cancelTimerTokenSource?.Cancel();
+            cancelTimerTokenSource?.Dispose();
             for (int i = _enemiesOnPlayField.Count - 1; i >= 0; i--)
             {
                 var enemy = _enemiesOnPlayField[i];
@@ -186,7 +182,44 @@ namespace Assets.Scripts.Enemies
 
         public void Restart()
         {
-            StartCoroutine(SpawnTimer());
+            cancelTimerTokenSource = new CancellationTokenSource();
+            cancelTimerToken = cancelTimerTokenSource.Token;
+            RunPeriodicallyAsync(SpawnTimer, new TimeSpan(0, 0, (int)SPAWN_TIME), cancelTimerToken);
+        }
+
+        public async void RunPeriodicallyAsync(Func<Task> func, TimeSpan interval, CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(interval, cancellationToken);
+                    await func();
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+        private Task SpawnTimer()
+        {
+            int random = UnityEngine.Random.Range(0, 10);
+            Enemy enemy = random < 7 ? _enemyPrefabs.AsteroidPrefab : _enemyPrefabs.UFOPrefab;
+
+            var spawnPoint = GetRandomSpawnPoint();
+            Spawn(enemy, spawnPoint.position, spawnPoint.rotation);
+
+            return Task.CompletedTask;
+        }
+
+        public void OnExit()
+        {
+            if (cancelTimerTokenSource != null && cancelTimerTokenSource.IsCancellationRequested == false)
+            {
+                cancelTimerTokenSource?.Cancel();
+                cancelTimerTokenSource?.Dispose();
+            }
         }
     }
 }

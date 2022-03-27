@@ -1,14 +1,16 @@
-using Assets.Scripts.UI;
+using Assets.Scripts.Core;
 using Assets.Scripts.Weapon;
+using System;
+using UnityEngine;
 
 namespace Assets.Scripts
 {
     public class SpaceshipPresenter
     {
         private Spaceship _spaceship;
-//        private HUDView _hudView;
         private SpaceshipInput _input;
         private WeaponManager _weaponManager;
+        private PlayField _playField;
 
         private float _maxMoveSpeed = 8f;
         private float _acceleration = 0.5f;
@@ -18,18 +20,18 @@ namespace Assets.Scripts
         private const int MAX_LIVES_COUNT = 0;
         private int _lives;
 
-        public SpaceshipPresenter(Spaceship spaceship, HUDView hudView, WeaponManager weaponManager)
+        public Action OnShipDied;
+        public SpaceshipPresenter(Spaceship spaceship, WeaponManager weaponManager)
         {
             _spaceship = spaceship;
-            _spaceship.OnDamaged += OnSpaceshipDamaged;
-     //       _hudView = hudView;
             _weaponManager = weaponManager;
 
+            _playField = GamePresenter.PlayField;
             Init();
         }
         private void Init()
         {
-
+          
             InitSpaceship();
 
             _input = new SpaceshipInput();
@@ -49,34 +51,47 @@ namespace Assets.Scripts
         private void InitSpaceship()
         {
             _spaceship.Init(_maxMoveSpeed, _acceleration, _rotatinSpeed, _stopSpeed);
-        }
-
-        public void StartGame()
-        {
-            _lives = MAX_LIVES_COUNT;
-            _weaponManager.StartGame();
+            _spaceship.ShipBoundsChecker.OnBoundCrossed += OnPortalEnter;
         }
 
         private void Shoot()
         {
             var bullet = _weaponManager.GetBullet();
-            _spaceship.Shoot(bullet);
+            UnityEngine.Object.Instantiate(bullet, _spaceship.ShipTransform.position, _spaceship.ShipBody.rotation, _playField.Rect);
         }
 
-        private void OnSpaceshipDamaged()
+        public void OnSpaceshipDamaged()
         {
             _lives--;
             if (_lives < 0)
-                Game.Instance.OnShipDied();
+                OnShipDied?.Invoke();
         }
-
-        public void OnGameOver()
+        public void OnPortalEnter()
         {
-            _input.Disable();
-            _spaceship.OnGameOver();
-            _weaponManager.OnGameOver();
-        }
+            var position = _spaceship.ShipTransform.anchoredPosition;
 
+            Vector3 newPosition = position;
+
+            if (position.x <= _playField.MinX)
+                newPosition.x = _playField.MaxX;
+            else if ((position.x >= _playField.MaxX))
+                newPosition.x = _playField.MinX;
+
+            if (position.y <= _playField.MinY)
+                newPosition.y = _playField.MaxY;
+
+            else if (position.y >= _playField.MaxY)
+                newPosition.y = _playField.MinY;
+
+
+            _spaceship.ShipTransform.anchoredPosition = newPosition;
+            _spaceship.OnPositionChanged?.Invoke(newPosition.y, newPosition.x);
+        }
+        public void StartGame()
+        {
+            _lives = MAX_LIVES_COUNT;
+            _weaponManager.StartGame();
+        }
         public void Restart()
         {
             _lives = MAX_LIVES_COUNT;
@@ -84,6 +99,25 @@ namespace Assets.Scripts
             _spaceship.Restart();
             _weaponManager.Restart();
             _input.Enable();
+        }
+        public void OnGameOver()
+        {
+            _input.Disable();
+            _spaceship.OnGameOver();
+        }
+
+        public void OnExit()
+        {
+            _input.Spaceship.Rotation.performed -= obj => _spaceship.SetRotationSpeed(obj.ReadValue<float>());
+            _input.Spaceship.Rotation.canceled -= _ => _spaceship.StopRotation();
+
+            _input.Spaceship.Accelerate.performed -= _ => _spaceship.StartAccelerate();
+            _input.Spaceship.Accelerate.canceled -= _ => _spaceship.StopAccelerate();
+
+            _input.Spaceship.Shoot.performed -= _ => Shoot();
+            _input.Spaceship.SwitchWeapon.performed -= _ => _weaponManager.SetWeaponNext();
+
+            _spaceship.ShipBoundsChecker.OnBoundCrossed -= OnPortalEnter;
         }
     }
 }
